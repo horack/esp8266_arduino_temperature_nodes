@@ -78,10 +78,10 @@ namespace codeus {
 // TODO: perhaps save node info in a local "file" in the node's flash
 // TODO: change code to allow slave nodes to ping a master and add or remove themselves dynamically
 codeus::NODEMCU_NODE NODEMCU_NODES[] = {
-	{true, 41, "Master LR", NULL}, // when building with IP_LAST_OCTET of 41, you're building the master, you can move the 'true' flag to another node, if you want
+	{false, 41, "Master LR", NULL},
 	{false, 40, "Mel", NULL},
 	{false, 42, "Garage", NULL},
-	{false, 43, "SW Room", NULL},
+	{true, 43, "SW Room", NULL}, // this node is flagged as the master, you can move the 'true' flag to another node, if you want
 	{false, 44, "Cold Room", NULL},
 	{false, 45, "Outside", NULL}
 };
@@ -104,8 +104,6 @@ String nodeName = String(ThisNode->defaultName);
 // time stuff -------------------------------------------------------------------------------------
 bool firstTimeGot = false;
 time_t curTimeSec = 0;
-const long tempInterval = 5000; // interval at which to read sensor
-unsigned long previousTempMillis = tempInterval; // will store last temp was read
 String timeStr = "NO-TIME-SET";
 String dateStr = "NO-DATE-SET";
 // the following 2 ints are just for diagnostic purposes to see how many times we tried to reach NPT and succeeded (and how far)
@@ -113,6 +111,8 @@ int nptGets = 0;
 int nptAttempts = 0;
 
 // Temperature sensor stuff -------------------------------------------------------------------------------------
+const long tempInterval = 5000; // interval at which to read sensor
+unsigned long previousTempMillis = tempInterval; // will store last temp was read
 #define TEMP_TYPE DS18 // set this to DS18 for Dallas 3 pin sensors, or DHT22 or DTH11 for the DHT 4 pin sensors
 #define TEMP_PIN	D1 // data pin for sensor
 
@@ -171,7 +171,7 @@ void setup() {
 	WiFi.config(myIp, gateway, subnet, dns1, dns2);
 	WiFi.begin(ssid, password);
 	while (WiFi.waitForConnectResult() != WL_CONNECTED) {
-		displayAll("Connection Failed! Rebooting...");
+		displayAll("Connection Failed!\nRebooting...");
 		delay(5000);
 		ESP.restart();
 	}
@@ -242,19 +242,19 @@ void loop() {
 		collectSlaveData();
 	}
  
-	// Check if a client has connected
+// ************************** check and handle request for data from a browser
 	WiFiClient client = server.available();
 	String request = acceptRequest(client);
 	if (request.length() > 0) { // we have a request
 		String payload = "";
-		if (request.indexOf("/reset") >= 0) {
+		if (request.indexOf("/reset") >= 0) { // this allows you to reset a node
 			ESP.restart();
-		} else if (request.indexOf("/data") >= 0) {
+		} else if (request.indexOf("/data") >= 0) { // this allows you to get temp data in a more easily machine readable format (used by a master to get slaves' data)
 			payload = "[[temperature[" + tempStr + "]][[humidity[" + humStr + "]][name[" + nodeName + "]][time[" + timeStr + "]][date[" + dateStr + "]][uptime[" + (millis() / 1000) + "]]";
-		} else {
+		} else { // a regular request formats the data in a human readable page
 			int textPtr = request.indexOf("text=");
 			Serial.println("textPtr = " + textPtr);
-			if (textPtr >= 0) {
+			if (textPtr >= 0) { // if you submit text from the human readable page, you can change the node's name from defaultName
 				int endPtr = request.indexOf("&", textPtr);
 				if (endPtr == -1) {
 					endPtr = request.indexOf(" ", textPtr);
@@ -266,6 +266,7 @@ void loop() {
 			}
 			String allNodes = "";
 			if (ThisNode->isMaster) {
+				// if we're master add in all the responding slave nodes' data for display
 				allNodes = "<br/>------other nodes-------<br/>";
 				for (int i = 0; i < NODEMCU_NODE_COUNT; i++) {
 					codeus::NODEMCU_NODE* node = &NODEMCU_NODES[i];
@@ -281,6 +282,7 @@ void loop() {
 				}
 			}
 
+			// this is the webapge we'll render to the browser
 			payload =
 				"<!DOCTYPE HTML><html>"
 				"<br><br>"
@@ -306,11 +308,11 @@ void loop() {
 			"\r\n\r\n");
 		
 		delay(1);
-		Serial.println("Client disonnected");
+		Serial.println("Client disconnected");
 		Serial.println("");
 	} // end client check
 	
-	// display stuff
+	// display stuff to the OLED too
 	displayText(
 		tempStr + "F" + "  " + "h:" + humStr + "%" + "\n" +
 		nodeName + "\n" +
@@ -423,13 +425,10 @@ String floatToStr(float f, int decims) {
 
 //-------------------------------------------------------------------------------------------------------
 void updateTemperature() {
-	// Wait at least 2 seconds seconds between measurements.
-	// if the difference between the current time and last time you read
-	// the sensor is bigger than the interval you set, read the sensor
-	// Works better than delay for things happening elsewhere also
+	// read temperature sensors and update displayable strings
 	unsigned long currentMillis = millis();
  
-	if(currentMillis - previousTempMillis >= tempInterval) {
+	if(currentMillis - previousTempMillis >= tempInterval) { // read only at given interval, not every time in the loop
 		// save the last time you read the sensor 
 		previousTempMillis = currentMillis;
 		// Reading temperature for humidity takes about 250 milliseconds!
@@ -452,14 +451,13 @@ void updateTemperature() {
 		}
 		tempStr = floatToStr(temp_f, 1);
 #if TEMP_TYPE != DS18
-		humStr = floatToStr(humidity, 1);
+		humStr = floatToStr(humidity, 1); // DHT type sensors also have humidity
 #endif
 	}
 }
 
 //-------------------------------------------------------------------------------------------------------
-const long timeInterval = 60*60*1000;		// interval at which to read time webpage (hourly)
-unsigned long previousTimeMillis = timeInterval;		// will store last time was read
+// helper to left zero pad a value to a given string size
 String zeroPad(int value, int digits) {
 	String s = String(value);
 	while (s.length() < digits) {
@@ -468,7 +466,7 @@ String zeroPad(int value, int digits) {
 	return s;
 }
 
-// checks if we have an incoming HTTP request
+// helper to check if we have an incoming HTTP request
 String acceptRequest(WiFiClient client) {
 	String result = "";
 	unsigned long ms = 0;
@@ -493,7 +491,7 @@ String acceptRequest(WiFiClient client) {
 	return result;
 }
 
-// make an outgoing HTTP GET request
+// helper to make an outgoing HTTP GET request
 String getHttpPayload(String url, unsigned long timeoutMaxMS) {
 	attemptsCount++;
 	String result = "";
@@ -517,6 +515,11 @@ String getHttpPayload(String url, unsigned long timeoutMaxMS) {
 	return result;
 }
 
+
+// NPT time server stuff ********************************************************************************
+const long timeInterval = 60*60*1000;		// interval at which to read time webpage (hourly)
+unsigned long previousTimeMillis = timeInterval;		// will store last time was read
+
 void updateTimeFromServer() {
 	unsigned long currentMillis = millis();
 	if(currentMillis - previousTimeMillis >= timeInterval) {
@@ -534,7 +537,7 @@ void updateTimeFromServer() {
 	timeStr = zeroPad(hourFormat12(), 2) + ":" + zeroPad(minute(), 2) + ":" + zeroPad(second(), 2) + " " + (isAM() ? "AM" : "PM");
 }
 
-//-------------------------------------------------------------------------------------------------------
+//----------------------
 #define localTimeOffset 21600UL // your localtime offset from UCT
 WiFiUDP udp;
 unsigned int localPort = 2390; // local port to listen for UDP packets
@@ -552,6 +555,7 @@ bool setNTPtime()
 	}
 	return false;
 }
+
 unsigned long getFromNTP(const char* server)
 {
 	udp.begin(localPort);
