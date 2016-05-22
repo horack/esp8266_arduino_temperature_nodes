@@ -230,6 +230,7 @@ void initDisplay() {
 }
 
 void connectWifiAccessPoint(String ssid, String password) {
+	WiFi.reconnect();
 	WiFi.mode(WIFI_STA);
 	WiFi.config(myIp, gateway, subnet, dns1, dns2);
 	displayAll("Begin SSID:\n" + ssid);
@@ -239,7 +240,6 @@ void connectWifiAccessPoint(String ssid, String password) {
 	password.toCharArray(passwordCC, (unsigned int)password.length() + 1);
 	WiFi.begin(ssidCC, passwordCC);
 	displayAll("Wait for SSID:\n" + String(ssid));
-	delay(100);
 	while (WiFi.waitForConnectResult() != WL_CONNECTED) {
 		displayAll("Connection Failed!\nRebooting...");
 		delay(5000);
@@ -507,6 +507,7 @@ void displayTextStatus(String line) {
 	display.setTextAlignment(TEXT_ALIGN_RIGHT);
 	display.setFont(ArialMT_Plain_16);
 	display.drawString(128, 16*3, line);
+	display.display();
 #endif //USE_OLED
 #ifdef USE_TFT
 	tft.fillRect(0, tft.height() - FONT_HEIGHT, tft.width(), FONT_HEIGHT, BACKGROUND_COLOR);
