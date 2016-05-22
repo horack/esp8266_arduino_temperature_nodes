@@ -1,19 +1,47 @@
+// This code can be found at: https://github.com/horack/esp8266_arduino_temperature_nodes
+// It has been build with snippets of code from many places, I've tried to provide links wherever I remembered the source...
+
+#include <Adafruit_ILI9341.h> // using version 1.0.2 (1.0.1 does not have esp8266 support, https://github.com/adafruit/Adafruit_ILI9341 )
+#include <Adafruit_GFX.h> // using version 1.1.5
+#include <SPI.h> // needed for TFT display
+#include <Fonts/FreeSerifBold18pt7b.h> // (for TF, find other fonts in Adafruit_GFX/Fonts folder)
+// These font settings have to match to the font you've included above
+#define THE_FONT &FreeSerifBold18pt7b
+#define FONT_HEIGHT FreeSerifBold18pt7b.yAdvance
+#define FONT_OFFSET 10
+
 // Both of these are included when you pick the Time library in Arduino IDE library manager
 #include <Time.h>
 #include <TimeLib.h>
-// This comes from ESP8266 libs I get when I use http://arduino.esp8266.com/stable/package_esp8266com_index.json in Arduino Preferences for Additional Board Manager URLs. 
+// These come from ESP8266 libs I get when I use http://arduino.esp8266.com/stable/package_esp8266com_index.json in Arduino Preferences for Additional Board Manager URLs
+// to set up Arduino for ESP8266 development.
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
+
 // This is an ESP8266 specific SSD1306 library (which shows up as "ESP8266 OLED Driver for SSD1306 display" in Library Manager)
-#include <SSD1306.h>
-#include <SSD1306Ui.h>
+#include <SSD1306.h> // this variant comes from https://github.com/adafruit/Adafruit-SSD1331-OLED-Driver-Library-for-Arduino
+
 // Include appropriate temperature sensor lib here
-#include <DHT_U.h> // unified DHT libs ?
-#include <DallasTemperature.h>
+#include <DHT_U.h> // Adafruit DHT Unified ( https://github.com/adafruit/Adafruit_DHT_Unified )
+#include <DallasTemperature.h> // ( https://github.com/milesburton/Arduino-Temperature-Control-Library )
 #include <OneWire.h>
 #define DS18 18 // pseudo value for Dallas temperature sensors
+
+// ***************************************************************************************************************************************************************
+// ***************************************************************************************************************************************************************
+// These are defines you'll want to change depending on which node you're programming, also look for AP_SSID and AP_PASSWORD
+// More info on these values and others further down, readl all comments (even if some MIGHT be out of date)
+#define IP_LAST_OCTET 40 // This defines this node's static IP, read on for more info (also find array NODEMCU_NODES)
+#define TEMP_TYPE DHT22 // set this to DS18 for Dallas 3 pin sensors, or DHT22 or DTH11 for the DHT 4 pin sensors
+#define USE_OLED // Uncomment if you're using an SSD1306 type 128x64 OLED display (currently set up for I2C version)
+//#define USE_TFT // Uncomment if you're using an ILI9341 type TFT display (you can have both OLED and TFT hooked up at the same time, display functions currently will mirror the data)
+// find Graphics section below to get pinout information for OLED and/or TFT module
+// ***************************************************************************************************************************************************************
+// When this code runs, you can query your module over http at: http://192.168.1.40:8484 (the ip may be different depending on your changes and network)
+// you can also get a more machine-readable version of the data by browsing to: http://192.168.1.40:8484/data 
+// ***************************************************************************************************************************************************************
 
 // This program will assign static IPs to your module(s). In my case my internal IPs are configured by the wifi router as 192.168.1.XXX
 // Note that you should make sure that the NODEMCU_NODES array (further down in code) does contain an entry for whatever value you set IP_LAST_OCTET to
@@ -21,7 +49,6 @@
 // NOTE: Always make sure you set up IP_LAST_OCTET correctly when you burn OTA (wirelessly), because if you're selecting one specific device over-the-air, but will be burning a different IP to it, it can cause you confusion,
 //       especially if there is already another node online with that same IP.
 // --------------------------------------------------------------------------------------------------------------------------------------------------
-#define IP_LAST_OCTET 43 // This defined IP_LAST_OCTET determines what 'XXX' is in the above IP, which defines this node's full static IP
 
 // NOTE: this is a path to my own accesspoint.h file, that contains my router's SSID and password, I am keeping this private.
 //       You can
@@ -42,8 +69,7 @@ WiFiServer server(PORT);
 
 // Here's info that needs to match you local WiFi configuration. Make sure the info is correct for your set up.
 // You can probably get this info by examining your computer's wifi network configuration (in Windows type "ipconfig" in a command line window)
-const char* ssid = AP_SSID;
-const char* password = AP_PASSWORD;
+// Note that the static IP is based on value of IP_LAST_OCTET
 const IPAddress myIp(192, 168, 1, IP_LAST_OCTET);
 const IPAddress gateway(192, 168, 1, 1);
 const IPAddress subnet(255, 255, 255, 0);
@@ -78,11 +104,11 @@ namespace codeus {
 // TODO: perhaps save node info in a local "file" in the node's flash
 // TODO: change code to allow slave nodes to ping a master and add or remove themselves dynamically
 codeus::NODEMCU_NODE NODEMCU_NODES[] = {
-	{false, 41, "Master LR", NULL},
-	{false, 40, "Mel", NULL},
-	{false, 42, "Garage", NULL},
-	{true, 43, "SW Room", NULL}, // this node is flagged as the master, you can move the 'true' flag to another node, if you want
-	{false, 44, "Cold Room", NULL},
+	{true,  40, "Livingroom", NULL},
+	{false, 41, "SW Room", NULL}, // this node is flagged as the master, you can move the 'true' flag to another node, if you want
+	{false, 42, "Mel", NULL},
+	{false, 43, "Cold Room", NULL},
+	{false, 44, "Garage", NULL},
 	{false, 45, "Outside", NULL}
 };
 #define NODEMCU_NODE_COUNT sizeof NODEMCU_NODES / sizeof NODEMCU_NODES[0]
@@ -103,7 +129,6 @@ String nodeName = String(ThisNode->defaultName);
 
 // time stuff -------------------------------------------------------------------------------------
 bool firstTimeGot = false;
-time_t curTimeSec = 0;
 String timeStr = "NO-TIME-SET";
 String dateStr = "NO-DATE-SET";
 // the following 2 ints are just for diagnostic purposes to see how many times we tried to reach NPT and succeeded (and how far)
@@ -113,7 +138,6 @@ int nptAttempts = 0;
 // Temperature sensor stuff -------------------------------------------------------------------------------------
 const long tempInterval = 5000; // interval at which to read sensor
 unsigned long previousTempMillis = tempInterval; // will store last temp was read
-#define TEMP_TYPE DS18 // set this to DS18 for Dallas 3 pin sensors, or DHT22 or DTH11 for the DHT 4 pin sensors
 #define TEMP_PIN	D1 // data pin for sensor
 
 // Initialize temperature sensor
@@ -134,18 +158,53 @@ String tempStr = "--.-"; // displayable temperature string
 String humStr = "--.-"; // displayable humidity string, for Dallas sensors this will remain as --.- since they don't have humidity sensing
 float humidity, temp_f;	// Values read from sensor
 
-// OLED 128X64 display settings -------------------------------------------------------------------------------------
-// Pin definitions for SPI OLED (I have not tested SPI OLED with the ESP8266, so you're on your own)
-//#define OLED_RESET	D0	// RESET
-//#define OLED_DC	D2	// Data/Command
-//#define OLED_CS	D8	// Chip select
-// Pin definitions for I2C OLED
-#define OLED_SDA	D2	// pin 14
-#define OLED_SDC	D4	// pin 12
-#define OLED_ADDR	0x3C
- // Uncomment one of the following based on OLED interface type (SPI or I2C)
-// SSD1306 display(true, OLED_RESET, OLED_DC, OLED_CS); // FOR SPI
-SSD1306	display(OLED_ADDR, OLED_SDA, OLED_SDC);	// For I2C
+
+// Graphics -----------------------------------------------------------------------------------------------------------------------------
+#ifdef USE_OLED
+// OLED 128x64 displays
+	// Haven't tested SPI OLED module, so you're on your own
+	//#define OLED_RESET	D0	// RESET
+	//#define OLED_DC	D2	// Data/Command
+	//#define OLED_CS	D8	// Chip select
+	// SSD1306 display(true, OLED_RESET, OLED_DC, OLED_CS); // FOR SPI
+
+	// Pin connections for I2C OLED
+	// OLED pin -> NODEMCU pin
+	// VCC -> any 3.3V NODEMCU pin
+	// GND -> any NODEMCU GND
+	// SCL -> D4 (GPIO2)
+	// SDA -> D2 (GPIO4)
+	#define OLED_SDA	D2
+	#define OLED_SCL	D4
+	#define OLED_ADDR	0x3C // I2C address for OLED, some might use 3D
+	SSD1306	display(OLED_ADDR, OLED_SDA, OLED_SCL);	// For I2C
+#endif //USE_OLED
+
+#ifdef USE_TFT
+// This is for the cheap touch screen ILI9341 based TFT display you find on Amazon and Ebay (less than $10), typically 320x240
+// Touch functionality not yet used in this code (I'll add it some day)
+	// Pin connections for ILI9341 TFT (note that any 3.3V can be shared, same for GND)
+	// ILI9341 pin -> NODEMCU pin
+	// VCC -> any NODEMCU 3.3V pin
+	// GND -> any NODEMCU GND
+	// D/C -> D3
+	// CS - > D8
+	// SDO(MISO) -> D6
+	// SDI(MOSI) -> D7
+	// SCK -> D5
+	// LED -> any 3.3V NODEMCU pin
+	// RESET -> any 3.3V NODEMCU pin
+	#define TFT_DC D3
+	#define TFT_CS D8
+	Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC);
+	#define BACKGROUND_COLOR ILI9341_BLACK
+	#define TOP_TEXT_COLOR ILI9341_YELLOW
+	#define TEXT_COLOR 0x05FF
+	#define STATUS_COLOR ILI9341_RED
+	#define TEXT_SIZE 1
+	#define ORIENTATION 1 // 2 is upside-down portrait
+#endif //USE_TFT
+#define ESP_SPI_FREQ 4000000
 
 // Master node stuff -------------------------------------------------------------------------------------
 #define SLAVE_CHECK_INTERVAL_SEC 60 // interval at which to scan slaves, don't make it too fast, scanning nodes is slow especially if some nodes are not online and responding
@@ -154,27 +213,51 @@ int getsCount = 0;
 int bytesCount = 0;
 int attemptsCount = 0;
 
-// SETUP function -------------------------------------------------------------------------------------
-void setup() {
-	Serial.begin(115200);
-	delay(10);
-
+// INIT functions -------------------------------------------------------------------------------------
+void initDisplay() {
 	// display stuff
+#ifdef USE_TFT
+	SPI.setFrequency(ESP_SPI_FREQ);
+	tft.begin();
+	tft.setRotation(ORIENTATION); // I flip display because of how I have the board in my setup, you may or may not need/want to flip
+	tft.fillScreen(BACKGROUND_COLOR);
+	tft.setFont(THE_FONT);
+#endif //USE_TFT
+#ifdef USE_OLED
 	display.init();
 	display.flipScreenVertically(); // I flip display because of how I have the board in my setup, you may or may not need/want to flip
-	
-	displayAll("Booting");
+#endif //USE_OLED
+}
 
-	// Connect to WiFi network
-	displayAll("Connecting SSID:\n" + String(ssid));
+void connectWifiAccessPoint(String ssid, String password) {
 	WiFi.mode(WIFI_STA);
 	WiFi.config(myIp, gateway, subnet, dns1, dns2);
-	WiFi.begin(ssid, password);
+	displayAll("Begin SSID:\n" + ssid);
+	char ssidCC[60];
+	char passwordCC[60];
+	ssid.toCharArray(ssidCC, (unsigned int)ssid.length() + 1);
+	password.toCharArray(passwordCC, (unsigned int)password.length() + 1);
+	WiFi.begin(ssidCC, passwordCC);
+	displayAll("Wait for SSID:\n" + String(ssid));
+	delay(100);
 	while (WiFi.waitForConnectResult() != WL_CONNECTED) {
 		displayAll("Connection Failed!\nRebooting...");
 		delay(5000);
 		ESP.restart();
 	}
+}
+
+// SETUP function -------------------------------------------------------------------------------------
+void setup() {
+	Serial.begin(115200);
+	delay(100);
+	initDisplay();
+
+	displayAll("Booting");
+
+	// Connect to WiFi network
+	displayAll("Connecting SSID:\n" + String(AP_SSID));
+	connectWifiAccessPoint(AP_SSID, AP_PASSWORD);
 	displayAll("WiFi connected");
 
 // ArduinoOTA setup, for the very cool over-the-air wireless code update ability
@@ -237,8 +320,7 @@ void loop() {
 	updateTemperature();
 
 // ***************************** if we're a Master node check slaves here
-	curTimeSec = now();
-	if (ThisNode->isMaster && slaveCheckNext <= curTimeSec) { // am I a master and is it time to collect data from slaves ?
+	if (ThisNode->isMaster && slaveCheckNext <= now()) { // am I a master and is it time to collect data from slaves ?
 		collectSlaveData();
 	}
  
@@ -267,17 +349,13 @@ void loop() {
 			String allNodes = "";
 			if (ThisNode->isMaster) {
 				// if we're master add in all the responding slave nodes' data for display
-				allNodes = "<br/>------other nodes-------<br/>";
+				allNodes = "";
 				for (int i = 0; i < NODEMCU_NODE_COUNT; i++) {
 					codeus::NODEMCU_NODE* node = &NODEMCU_NODES[i];
 					//TODO: build response from all nodes
-					if (node->result != NULL) {
+					if (node->result != NULL && node->lastIPOctet != IP_LAST_OCTET) {
 						codeus::SLAVE_RESULT* res = node->result;
-						allNodes = allNodes +
-							"<font size='10' color='gold'><b>" + res->name + "</b></font>&nbsp;&nbsp;&nbsp;&nbsp;"  +
-							"<font size='10' color='red'>" + res->temperature + "&deg;</font>&nbsp;&nbsp;&nbsp;&nbsp;" +
-							"<font size='10' color='green'>" + res->humidity +"% rh</font>&nbsp;&nbsp;&nbsp;&nbsp;" +
-							"<br>";
+						allNodes = allNodes + buildNodeHtml(res->name, res->temperature, res->humidity, node->lastIPOctet, 	now() - res->lastUpdateEpoch) + "<br>";
 					}
 				}
 			}
@@ -286,14 +364,10 @@ void loop() {
 			payload =
 				"<!DOCTYPE HTML><html>"
 				"<br><br>"
-				"<font size='16' color='gold'><b>" + nodeName + "</b></font><br/>"
-				"<font size='16' color='red'>" + tempStr + "&deg;</font>&nbsp;&nbsp;&nbsp;&nbsp;"
-				"<font size='16' color='green'>" + humStr +"% rh</font>"
-				"<br>"
-				"Time: <font size='16' color='black'>" + timeStr + "</font><br>"
-				"Date: <font size='16' color='black'>" + dateStr + "</font><br>"
-				"<form action='/' method='get'><input type='text' name='text'/><input type='submit' value='Send'/></form>"
-				"<br/>NPT attempts: " + nptAttempts + " NPT succeses: " + nptGets + " Uptime seconds: " + (millis() / 1000) + " at: " + attemptsCount + " gc: " + getsCount +
+				"<font size='16' color='black'>Time: " + timeStr + "</font><br>"
+				"<font size='16' color='black'>Date: " + dateStr + "</font><br>" +
+				"<form action='/' method='get'><input type='text' name='text'/><input type='submit' value='Rename'/></form><br>" +
+				buildNodeHtml(nodeName, tempStr, humStr, IP_LAST_OCTET, 0) + "<br>" +
 				allNodes +
 				"</html>"
 				"";
@@ -312,7 +386,7 @@ void loop() {
 		Serial.println("");
 	} // end client check
 	
-	// display stuff to the OLED too
+	// display stuff to the OLED/TFT too
 	displayText(
 		tempStr + "F" + "  " + "h:" + humStr + "%" + "\n" +
 		nodeName + "\n" +
@@ -321,9 +395,16 @@ void loop() {
 		""
 	);
 }
+String buildNodeHtml(String nStr, String tStr, String hStr, int octet, time_t secondsSinceReading) {
+	return
+		"<font size='16' color='blue'><b>" + nStr + "</b>:</font>&nbsp;&nbsp;"
+		"<font size='16' color='red'>" + tStr + "&deg;</font>&nbsp;&nbsp;"
+		"<font size='16' color='green'>" + hStr +"% rh</font>" +
+		"<font size='14' color='black'>[" + String(octet) + "] " + String(secondsSinceReading) +" seconds</font>";
+}
 
 void collectSlaveData() {
-	slaveCheckNext = curTimeSec + SLAVE_CHECK_INTERVAL_SEC;
+	slaveCheckNext = now() + SLAVE_CHECK_INTERVAL_SEC;
 	for (int i = 0; i < NODEMCU_NODE_COUNT; i++) {
 		codeus::NODEMCU_NODE* node = &NODEMCU_NODES[i];
 		if (node->lastIPOctet != IP_LAST_OCTET) { // skip ourselves
@@ -338,10 +419,11 @@ void collectSlaveData() {
 				String n = extractSlaveValue(res, "name");
 				String t = extractSlaveValue(res, "temperature");
 				String h = extractSlaveValue(res, "humidity");
-				node->result = new codeus::SLAVE_RESULT {curTimeSec, n, t, h}; // maybe use now() instead of curTimeSec
+				node->result = new codeus::SLAVE_RESULT {now(), n, t, h};
 			}
 		}
 	}		
+	displayTextStatus("");
 }
 
 // parses a slave's returned data to extract a certain field, data is in format of: [fieldname1[fieldvalue1]][fieldname2[fieldvalue2]]...
@@ -365,11 +447,29 @@ void displayAll(String text) {
 	displayText(text);
 }
 
+#ifdef USE_TFT
+String oldText = ""; // use this to prevent flashing by not updating if no text change
+#endif //USE_TFT
+
 // display text to OLED - every \n newline character advances to next line (4 lines available)
 void displayText(String lines) {
+#ifdef USE_OLED
 	display.clear();
 	display.setTextAlignment(TEXT_ALIGN_RIGHT);
 	display.setFont(ArialMT_Plain_16);
+#endif
+#ifdef USE_TFT
+	if (lines == oldText) {
+		return;
+	}
+	oldText = lines;
+//	tft.fillScreen(BACKGROUND_COLOR); 
+	tft.fillRect(0, 0, tft.width(), FONT_HEIGHT*4, BACKGROUND_COLOR);
+	tft.drawRect(0, 0, tft.width(), FONT_HEIGHT*4, TEXT_COLOR);
+	tft.setTextSize(TEXT_SIZE);
+	tft.setCursor(0, FONT_HEIGHT - FONT_OFFSET);
+	tft.setTextColor(TOP_TEXT_COLOR); // first lines uses "special" color
+#endif
 	int lineY = 0;
 	int ptr = 0;
 	int len = lines.length();
@@ -379,24 +479,43 @@ void displayText(String lines) {
 			newLine = len;
 		}
 		String line = lines.substring(ptr, newLine);
+#ifdef USE_OLED
 		if (line.length() > 0) {
 			display.drawString(128, lineY, line);
 		}
-		ptr = newLine + 1;
+#endif
+#ifdef USE_TFT
+		tft.println(line);
+		if (lineY == 0) {
+			tft.setTextColor(TEXT_COLOR); // subsequent lines use normal color
+		}
+#endif
 		lineY += 16;
+		ptr = newLine + 1;
 	}
+#ifdef USE_OLED
 	display.display();
+#endif //USE_OLED
 }
 
 // updates just the bottom line of the display
 void displayTextStatus(String line) {
-	display.setTextAlignment(TEXT_ALIGN_RIGHT);
-	display.setFont(ArialMT_Plain_16);
+#ifdef USE_OLED
 	display.setColor(BLACK);
 	display.fillRect(0, 16*3, 128, 16);
 	display.setColor(WHITE);
+	display.setTextAlignment(TEXT_ALIGN_RIGHT);
+	display.setFont(ArialMT_Plain_16);
 	display.drawString(128, 16*3, line);
-	display.display();
+#endif //USE_OLED
+#ifdef USE_TFT
+	tft.fillRect(0, tft.height() - FONT_HEIGHT, tft.width(), FONT_HEIGHT, BACKGROUND_COLOR);
+	tft.drawRect(0, tft.height() - FONT_HEIGHT, tft.width(), FONT_HEIGHT, STATUS_COLOR);
+	tft.setTextSize(TEXT_SIZE);
+	tft.setCursor(0, tft.height() - FONT_OFFSET);
+	tft.setTextColor(STATUS_COLOR);
+	tft.println(line);
+#endif //USE_TFT
 }
 
 // helper to convert a float value to a string with given number of decimals after period (TODO: round value to given decimal)
@@ -530,34 +649,38 @@ void updateTimeFromServer() {
 			previousTimeMillis = currentMillis;
 			firstTimeGot = true;
 		} else {
-			previousTimeMillis = currentMillis - timeInterval + (1*60*1000); // if failed, try again in 1 minute
+			previousTimeMillis = currentMillis - timeInterval + (30*1000); // if failed, try again in 30 seconds
 		}
 	}
 	dateStr = String(dayShortStr(weekday())) + ", " + String(monthShortStr(month())) + " " + String(day());
-	timeStr = zeroPad(hourFormat12(), 2) + ":" + zeroPad(minute(), 2) + ":" + zeroPad(second(), 2) + " " + (isAM() ? "AM" : "PM");
+	String secStr = "";
+#ifndef USE_TFT
+	secStr = ":" + zeroPad(second(), 2); // add seconds in only if NOT tft because it causes too much flashing (need to figure out double buffering)
+#endif
+	timeStr = zeroPad(hourFormat12(), 2) + ":" + zeroPad(minute(), 2) + secStr + " " + (isAM() ? "AM" : "PM");
 }
 
-//----------------------
+// NPT server time retrieve code -------------------------------------------------------------------------------------------------------
+// Found at (and slightly munged) http://www.esp8266.com/viewtopic.php?p=18395 posted by user "nigelbe", it is all the info I have, thank you Nigel
+// Note that I've modified the dst function to (hopefully) get correct daylight savings time offset for USA
 #define localTimeOffset 21600UL // your localtime offset from UCT
 WiFiUDP udp;
 unsigned int localPort = 2390; // local port to listen for UDP packets
 const char* timeServer = "us.pool.ntp.org"; // fall back to regional time server
 const int NTP_PACKET_SIZE = 48; // NTP time stamp is in the first 48 bytes of the message
 byte packetBuffer[ NTP_PACKET_SIZE]; //buffer to hold incoming and outgoing packets
-bool setNTPtime()
-{
+bool setNTPtime() {
 	time_t epoch = 0UL;
 	if((epoch = getFromNTP(timeServer)) != 0){ // get from time server
 		epoch -= 2208988800UL + localTimeOffset;
-		setTime(epoch += dst(epoch));
+		setTime(epoch += dstUSA(epoch));
 		nptGets++;
 		return true;
 	}
 	return false;
 }
 
-unsigned long getFromNTP(const char* server)
-{
+unsigned long getFromNTP(const char* server) {
 	udp.begin(localPort);
 	sendNTPpacket(server); // send an NTP packet to a time server
 	delay(1000); // wait to see if a reply is available
@@ -583,8 +706,7 @@ unsigned long getFromNTP(const char* server)
 }
 
 // send an NTP request to the time server at the given address
-unsigned long sendNTPpacket(const char* server)
-{
+unsigned long sendNTPpacket(const char* server) {
 	Serial.print("sending NTP packet to ");
 	Serial.println(server);
 	// set all bytes in the buffer to 0
@@ -608,7 +730,7 @@ unsigned long sendNTPpacket(const char* server)
 	udp.endPacket();
 }
 
-int dst (time_t t) // calculate if summertime in USA (2nd Sunday in Mar, first Sunday in Nov)
+int dstUSA (time_t t) // calculate if summertime in USA (2nd Sunday in Mar, first Sunday in Nov)
 {
 	tmElements_t te;
 	te.Year = year(t)-1970;
