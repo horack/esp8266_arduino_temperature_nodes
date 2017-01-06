@@ -24,7 +24,7 @@
 #include <SSD1306.h> // this variant comes from https://github.com/adafruit/Adafruit-SSD1331-OLED-Driver-Library-for-Arduino
 
 // Include appropriate temperature sensor lib here
-#include <DHT_U.h> // Adafruit DHT Unified ( https://github.com/adafruit/Adafruit_DHT_Unified )
+#include <DHT.h> // Adafruit DHT (NOT Unified DHT) library ( https://github.com/adafruit/DHT-sensor-library )
 #include <DallasTemperature.h> // ( https://github.com/milesburton/Arduino-Temperature-Control-Library )
 #include <OneWire.h>
 #define DS18 18 // pseudo value for Dallas temperature sensors
@@ -42,6 +42,21 @@
 // When this code runs, you can query your module over http at: http://192.168.1.40:8484 (the ip may be different depending on your changes and network)
 // you can also get a more machine-readable version of the data by browsing to: http://192.168.1.40:8484/data 
 // ***************************************************************************************************************************************************************
+
+// Apparently the Dn NodeMCU pins are no longer defined, so here they are
+#ifndef D1
+#define D0 16 // cannot use for interrupts
+#define D1 5
+#define D2 4
+#define D3 0
+#define D4 2
+#define D5 14 // this is also SCLK
+#define D6 12 // this is also MISO
+#define D7 13 // this is also MOSI
+#define D8 15 // this is also CS
+#define D9 3
+#define D10 1
+#endif
 
 // This program will assign static IPs to your module(s). In my case my internal IPs are configured by the wifi router as 192.168.1.XXX
 // Note that you should make sure that the NODEMCU_NODES array (further down in code) does contain an entry for whatever value you set IP_LAST_OCTET to
